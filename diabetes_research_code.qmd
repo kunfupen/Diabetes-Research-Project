@@ -1,0 +1,188 @@
+---
+title: "Diabetes Research Code"
+format: pdf
+editor: visual
+---
+
+### Load Required library
+
+```{r}
+library(readr)
+library(car)
+library(ggplot2)
+library(dplyr)
+library(caret)
+library(corrplot)
+library(pROC)
+set.seed(140)
+```
+
+### Load Dataset
+
+```{r}
+dataset <- read_csv("diabetes_dataset.csv")
+```
+
+### Preview Dataset
+
+```{r}
+head(dataset)
+```
+
+### Run initial model
+
+```{r}
+model <- glm(Outcome ~ Age + Pregnancies + BMI + BloodPressure + HbA1c + LDL + HDL + Triglycerides + WaistCircumference + HipCircumference + WHR + factor(FamilyHistory) + factor(DietType) + factor(Hypertension) + factor(MedicationUse), data = dataset, family = "binomial")
+
+summary(model)
+vif(model)
+```
+
+### AIC - Backward
+
+```{r}
+backward_model <- step(model, direction = "backward")
+summary(backward_model)
+vif(backward_model)
+```
+
+### AIC - Bidirectional
+
+```{r}
+both_model <- step(model, direction = "both")
+summary(both_model)
+```
+
+### Anova test
+
+```{r}
+anova(backward_model, model)
+```
+
+### Correlation for final dataset
+
+```{r}
+final_model_dataset <- dataset[,c("Age", "HbA1c", "FamilyHistory","BMI")]
+cor(final_model_dataset)
+```
+
+### Finalize the model
+
+```{r}
+final_model <- glm(Outcome ~ Age + HbA1c + factor(FamilyHistory) + BMI, data = dataset, family = "binomial")
+summary(final_model)
+vif(final_model)
+```
+
+### Create correlation heatmap
+
+```{r}
+cor_matrix <- cor(final_model_dataset, use = "pairwise.complete.obs")
+diag(cor_matrix) <- 1
+
+#png(
+#  "correlation_heatmap_large.png",
+ # width = 2000,
+ # height = 2000,
+ # res = 120)
+
+heatmap <- corrplot(
+  cor_matrix,
+  method = "color",
+  type = "upper",
+  addCoef.col = "black",
+  tl.col = "black",
+  tl.srt = 45,
+  diag = TRUE)
+
+#dev.off()
+heatmap
+```
+
+### Visualization
+
+```{r}
+temp_data <- dataset %>%
+  mutate(AgeGroup = cut(Age, breaks = seq(10, 90, by = 10), include.lowest = TRUE, right = FALSE),
+         FamilyHistory = factor(FamilyHistory, levels = c(0, 1), labels = c("No", "Yes")))
+
+diabetes_data <- temp_data %>% filter(Outcome == 1)
+
+ggplot(diabetes_data, aes(x = AgeGroup, fill = FamilyHistory)) + 
+  geom_bar(position = "dodge", alpha = 0.8) + 
+  labs(title = "Diabetes Cases by Age Group and Family History",
+       x = "Age Group",
+       y = "Count of Diabetes Cases",
+       fill = "Family History") +
+  scale_fill_manual(values = c("No" = "lightblue", "Yes" = "salmon")) +
+  theme_minimal()
+
+```
+
+```{r}
+temp_dataset <- dataset %>%
+  mutate(BMI_category = cut(BMI, 
+                            breaks = c(10, 20, 30, 40, 50), 
+                            labels = c("10-20", "20-30", "30-40", "40-50"), 
+                            include.lowest = TRUE))
+
+temp_dataset$Outcome <- factor(temp_dataset$Outcome, levels = c(0, 1), labels = c("No", "Yes"))
+    
+
+
+ggplot(data=temp_dataset, 
+       mapping = aes(x = HbA1c,
+                     y = factor(BMI_category),
+                     group = Outcome,
+                     color = Outcome)) +
+  stat_summary(fun = "mean", geom = "point") +
+  stat_summary(fun = "mean", geom = "line") +
+  labs(title = "Interaction between HbA1c and BMI category on Diabetes Outcome", 
+      x = "HbA1c level",
+      y = "BMI",
+      color = "Outcome")
+```
+
+### Model Evaluation
+
+```{r}
+train_index <- createDataPartition(dataset$Outcome, p=0.7, list= FALSE)
+train_data <- dataset[train_index,]
+test_data <- dataset[-train_index,]
+
+train_model <- glm(Outcome ~ Age + BMI + HbA1c + factor(FamilyHistory), data = train_data, family = "binomial")
+
+predictions <- predict(train_model, newdata = test_data, type = "response")
+predicted_classification <- ifelse(predictions > 0.5, 1, 0)
+
+conf_matrix <- confusionMatrix(as.factor(predicted_classification), as.factor(test_data$Outcome))
+
+conf_matrix
+```
+
+### Plotting ROC curve
+
+```{r}
+roc_curve <- roc(test_data$Outcome, predictions)
+plot(roc_curve)
+```
+
+```{r}
+auc_value <- auc(roc_curve)
+auc_value
+```
+
+### 5-fold cross validation
+
+```{r}
+train_control <- trainControl(method = "cv", number = 5)
+cv_model <- train(Outcome ~ Age + BMI + HbA1c + factor(FamilyHistory),
+                  data = dataset,
+                  method = "glm",
+                  family = "binomial",
+                  trControl = train_control)
+cv_model
+
+cv_accuracy <- cv_model$results
+cv_accuracy
+```
