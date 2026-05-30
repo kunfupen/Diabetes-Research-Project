@@ -20,7 +20,7 @@ set.seed(140)
 ### Load Dataset
 
 ```{r}
-dataset <- read_csv("diabetes_dataset.csv")
+dataset <- read_csv("../data/diabetes_dataset.csv")
 ```
 
 ### Preview Dataset
